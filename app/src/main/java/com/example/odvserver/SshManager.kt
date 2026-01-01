@@ -17,6 +17,8 @@ class SshManager {
     ): String = withContext(Dispatchers.IO) {
         val ssh = SSHClient()
         // fara cheie
+        // ATENTIE este nesigur pentru retele publice
+        // de preferat sa se foloseasca doar in retele locale
         ssh.addHostKeyVerifier(PromiscuousVerifier())
 
         try {

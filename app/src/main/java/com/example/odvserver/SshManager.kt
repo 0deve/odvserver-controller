@@ -16,9 +16,9 @@ class SshManager {
         command: String
     ): String = withContext(Dispatchers.IO) {
         val ssh = SSHClient()
-        // fara cheie
-        // ATENTIE este nesigur pentru retele publice
-        // de preferat sa se foloseasca doar in retele locale
+        // no key
+        // WARNING not secure for public networks
+        // prefer using only in local networks
         ssh.addHostKeyVerifier(PromiscuousVerifier())
 
         try {
@@ -28,13 +28,13 @@ class SshManager {
             // auth
             ssh.authPassword(user, pass)
 
-            // sesiune
+            // session
             val session = ssh.startSession()
             return@withContext try {
-                // comanda
+                // command
                 val cmd = session.exec(command)
 
-                // rezultat
+                // result
                 val output = cmd.inputStream.reader().readText()
                 val error = cmd.errorStream.reader().readText()
 

@@ -3,6 +3,7 @@ package com.example.odvserver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Code // icon for terminal
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.LightMode
@@ -15,9 +16,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
+// update enum
 enum class Screen {
     Control,
-    Logs
+    Logs,
+    Terminal // new screen
 }
 
 // data class to hold common data between screens
@@ -43,6 +46,8 @@ fun AppContainer(
     // connection details
     val connectionDetails = remember { ConnectionDetails() }
     val sshManager = remember { SshManager() }
+
+    var terminalHistory by remember { mutableStateOf(listOf<TerminalItem>()) }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -88,12 +93,25 @@ fun AppContainer(
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
 
+                //logs
                 NavigationDrawerItem(
                     label = { Text("Logs") },
                     icon = { Icon(Icons.Filled.Description, contentDescription = null) },
                     selected = currentScreen == Screen.Logs,
                     onClick = {
                         currentScreen = Screen.Logs
+                        scope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+
+                // terminal
+                NavigationDrawerItem(
+                    label = { Text("Terminal / Shell") },
+                    icon = { Icon(Icons.Filled.Code, contentDescription = null) },
+                    selected = currentScreen == Screen.Terminal,
+                    onClick = {
+                        currentScreen = Screen.Terminal
                         scope.launch { drawerState.close() }
                     },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
@@ -108,6 +126,7 @@ fun AppContainer(
                         Text(when(currentScreen) {
                             Screen.Control -> "Server Control"
                             Screen.Logs -> "Server Logs"
+                            Screen.Terminal -> "Terminal" // title
                         })
                     },
                     navigationIcon = {
@@ -129,6 +148,13 @@ fun AppContainer(
                     Screen.Logs -> LogsScreen(
                         sshManager = sshManager,
                         connectionDetails = connectionDetails
+                    )
+                    Screen.Terminal -> TerminalScreen(
+                        sshManager = sshManager,
+                        connectionDetails = connectionDetails,
+                        // pass the history of the terminal
+                        history = terminalHistory,
+                        onHistoryUpdate = { terminalHistory = it }
                     )
                 }
             }

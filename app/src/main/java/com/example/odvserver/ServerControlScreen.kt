@@ -39,6 +39,16 @@ fun ServerControlScreen(
 
     val scope = rememberCoroutineScope()
 
+    // check connection on load
+    LaunchedEffect(Unit) {
+        if (sshManager.isConnected()) {
+            isConnected = true
+            logs = "Session active."
+            // update local text fields to match active connection
+            // if needed but connectionDetails acts as global state anyway
+        }
+    }
+
     // update global object when text changes
     fun updateCredentials() {
         connectionDetails.ip = ip
@@ -172,8 +182,8 @@ fun ServerControlScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Button(onClick = { runCmd("docker restart jellyfin") }, enabled = !isLoading) {
-                    Text("Restart Jellyfin")
+                Button(onClick = { runCmd("df -h") }, enabled = !isLoading) {
+                    Text("Disk Usage")
                 }
 
                 Button(

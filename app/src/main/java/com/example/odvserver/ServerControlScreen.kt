@@ -6,6 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -155,6 +156,23 @@ fun ServerControlScreen(
             } else {
                 Text(if (isConnected) "RECONNECT" else "CONNECT")
             }
+        }
+
+        // clear hosts button (security reset)
+        TextButton(
+            onClick = {
+                val deleted = sshManager.clearKnownHosts()
+                if (deleted) logs = "Known Hosts cleared. Next connection will be treated as new."
+                else logs = "No Known Hosts file found to clear."
+                isConnected = false
+                sshManager.disconnect()
+            },
+            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            modifier = Modifier.padding(top = 8.dp)
+        ) {
+            Icon(Icons.Filled.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Clear Known Hosts (Reset Security)")
         }
 
         Spacer(modifier = Modifier.height(24.dp))

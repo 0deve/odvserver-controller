@@ -47,7 +47,8 @@ fun AppContainer(
 
     // connection details
     val connectionDetails = remember { ConnectionDetails() }
-    val sshManager = remember { SshManager() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sshManager = remember { SshManager(context) }
 
     var terminalHistory by remember { mutableStateOf(listOf<TerminalItem>()) }
 

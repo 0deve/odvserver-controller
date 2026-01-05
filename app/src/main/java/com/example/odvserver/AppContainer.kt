@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code // icon for terminal
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Menu
@@ -20,7 +21,8 @@ import kotlinx.coroutines.launch
 enum class Screen {
     Control,
     Logs,
-    Terminal // new screen
+    Terminal,
+    Overview
 }
 
 // data class to hold common data between screens
@@ -93,6 +95,18 @@ fun AppContainer(
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
 
+                // overview
+                NavigationDrawerItem(
+                    label = { Text("Overview") },
+                    icon = { Icon(Icons.Filled.Dashboard, contentDescription = null) }, // foloseste Dashboard sau Info
+                    selected = currentScreen == Screen.Overview,
+                    onClick = {
+                        currentScreen = Screen.Overview
+                        scope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+
                 //logs
                 NavigationDrawerItem(
                     label = { Text("Logs") },
@@ -125,8 +139,9 @@ fun AppContainer(
                     title = {
                         Text(when(currentScreen) {
                             Screen.Control -> "Server Control"
+                            Screen.Overview -> "Overview"
                             Screen.Logs -> "Server Logs"
-                            Screen.Terminal -> "Terminal" // title
+                            Screen.Terminal -> "Terminal"
                         })
                     },
                     navigationIcon = {
@@ -142,6 +157,10 @@ fun AppContainer(
             Box(modifier = Modifier.padding(contentPadding)) {
                 when (currentScreen) {
                     Screen.Control -> ServerControlScreen(
+                        sshManager = sshManager,
+                        connectionDetails = connectionDetails
+                    )
+                    Screen.Overview -> OverviewScreen(
                         sshManager = sshManager,
                         connectionDetails = connectionDetails
                     )

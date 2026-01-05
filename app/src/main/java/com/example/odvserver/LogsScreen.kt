@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Close
@@ -27,20 +29,31 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-
 data class LogEntry(
     val id: String,
     val message: String,
     val service: String,
+    val pid: String,
     val timestamp: String,
-    val priority: Int, // 0-3=err, 4=warn, 6=info
+    val priority: Int,
     val rawTime: Long
 )
 
-// enum for sorting
 enum class SortOption {
-    TimeNewest, // default
-    Priority    // most severe first
+    TimeNewest,
+    Priority
+}
+
+// log levels
+enum class LogLevel(val label: String, val value: Int) {
+    Emergency("Only emergency", 0),
+    Alert("Alert and above", 1),
+    Critical("Critical and above", 2),
+    Error("Error and above", 3),
+    Warning("Warning and above", 4),
+    Notice("Notice and above", 5),
+    Info("Info and above", 6),
+    Debug("Debug and above", 7)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,117 +68,141 @@ fun LogsScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
-    // filter state
+    // filters state
     var searchQuery by remember { mutableStateOf("") }
     var sortOption by remember { mutableStateOf(SortOption.TimeNewest) }
+    var filterLogLevel by remember { mutableStateOf(LogLevel.Warning) }
 
-    // date state (null = today/recent, long = chosen timestamp)
+    // date state
     var selectedDateMillis by remember { mutableStateOf<Long?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
 
-    // sort dropdown menu
+    // interaction state
+    var selectedLog by remember { mutableStateOf<LogEntry?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
+    var showLevelMenu by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
     val dateState = rememberDatePickerState()
 
-    // date formatting
     fun formatDateForCmd(millis: Long): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         return sdf.format(Date(millis))
     }
 
-    // fetch function
     fun fetchLogs() {
         if (connectionDetails.ip.isBlank()) {
-            errorMsg = "not connected (missing ip)"
+            errorMsg = "Not connected (missing IP)"
             return
         }
 
         isLoading = true
         errorMsg = null
+        logsList = emptyList()
 
         scope.launch {
-            // build command dynamically
-            // json output, no pager
-            val cmdBuilder = StringBuilder("journalctl -o json --no-pager")
+            try {
+                val safePass = connectionDetails.password.replace("'", "'\\''")
 
-            // date filter
-            if (selectedDateMillis != null) {
-                val dateStr = formatDateForCmd(selectedDateMillis!!)
-                // search interal for hour
-                cmdBuilder.append(" --since '$dateStr 00:00:00' --until '$dateStr 23:59:59'")
-            } else {
-                // if date not selected take last 100
-                cmdBuilder.append(" -n 100")
-            }
+                // command
+                val cmdBuilder = StringBuilder("echo '$safePass' | sudo -S -p '' journalctl -o json --no-pager")
 
-            // text filter
-            // for case insensitive
-            if (searchQuery.isNotBlank()) {
-                cmdBuilder.append(" --grep '$searchQuery' -i")
-            }
+                // priority filter
+                cmdBuilder.append(" -p ${filterLogLevel.value}")
 
-            // reverse at the end for newest
-            // --until
-            if (selectedDateMillis == null) {
-                cmdBuilder.append(" --reverse")
-            }
+                // filter data
+                if (selectedDateMillis != null) {
+                    val dateStr = formatDateForCmd(selectedDateMillis!!)
+                    cmdBuilder.append(" --since '$dateStr 00:00:00' --until '$dateStr 23:59:59'")
+                } else {
+                    cmdBuilder.append(" -n 100")
+                }
 
-            val cmd = cmdBuilder.toString()
+                // text filter
+                if (searchQuery.isNotBlank()) {
+                    cmdBuilder.append(" --grep '(?i)$searchQuery'")
+                }
 
-            val result = sshManager.sendCommand(
-                connectionDetails.ip,
-                connectionDetails.user,
-                connectionDetails.password,
-                cmd
-            )
+                // imp sort
+                if (selectedDateMillis == null) {
+                    cmdBuilder.append(" --reverse")
+                }
 
-            if (result.startsWith("Err")) {
-                errorMsg = result
-            } else {
-                val parsedLogs = mutableListOf<LogEntry>()
-                val lines = result.lines()
+                // for spam
+                cmdBuilder.append(" | grep -v 'sudo:session' | grep -v 'journalctl'")
 
-                for (line in lines) {
-                    if (line.isNotBlank()) {
+                val fullCmd = cmdBuilder.toString()
+
+                val result = sshManager.sendCommand(
+                    connectionDetails.ip,
+                    connectionDetails.user,
+                    connectionDetails.password,
+                    fullCmd
+                )
+
+                if (result.startsWith("Err")) {
+                    errorMsg = result
+                } else if (result.contains("incorrect password", ignoreCase = true)) {
+                    errorMsg = "Sudo Error: Incorrect password."
+                } else {
+                    val parsedLogs = mutableListOf<LogEntry>()
+                    val lines = result.lines()
+                    var successCount = 0
+
+                    for (line in lines) {
+                        if (line.isBlank()) continue
+
                         try {
                             val json = JSONObject(line)
-
                             val msg = json.optString("MESSAGE", "-")
-                            val srv = json.optString("SYSLOG_IDENTIFIER", "sys")
+                            val srv = json.optString("SYSLOG_IDENTIFIER", "system")
+                            val pid = json.optString("_PID", "N/A")
                             val prio = json.optInt("PRIORITY", 6)
                             val timeMicro = json.optLong("__REALTIME_TIMESTAMP", System.currentTimeMillis() * 1000)
 
                             val dateObj = Date(timeMicro / 1000)
-                            val sdfDisplay = SimpleDateFormat("HH:mm:ss", Locale.US)
+                            // formatul cerut dd/MM/yyyy + ora
+                            val sdfDisplay = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.US)
                             val timeStr = sdfDisplay.format(dateObj)
 
                             parsedLogs.add(LogEntry(
                                 id = timeMicro.toString(),
                                 message = msg,
                                 service = srv,
+                                pid = pid,
                                 timestamp = timeStr,
                                 priority = prio,
                                 rawTime = timeMicro
                             ))
+                            successCount++
                         } catch (e: Exception) {
-                            // ignore bad json
+                            // ignore
+                        }
+                    }
+
+                    if (successCount > 0) {
+                        logsList = when(sortOption) {
+                            SortOption.TimeNewest -> parsedLogs.sortedByDescending { it.rawTime }
+                            SortOption.Priority -> parsedLogs.sortedBy { it.priority }
+                        }
+                    } else {
+                        if (result.isBlank()) {
+                            errorMsg = "No logs found."
+                        } else {
+                            val rawPreview = if (result.length > 300) result.take(300) + "..." else result
+                            errorMsg = "Server output:\n$rawPreview"
                         }
                     }
                 }
-
-                // apply selected sort
-                logsList = when(sortOption) {
-                    SortOption.TimeNewest -> parsedLogs.sortedByDescending { it.rawTime }
-                    SortOption.Priority -> parsedLogs.sortedBy { it.priority } // 0 is most severe
-                }
+            } catch (e: Exception) {
+                errorMsg = "Critical Error: ${e.message}"
+            } finally {
+                isLoading = false
             }
-            isLoading = false
         }
     }
 
-    // reload when local sort changes
+    // effects
     LaunchedEffect(sortOption) {
         if (logsList.isNotEmpty()) {
             logsList = when(sortOption) {
@@ -175,12 +212,15 @@ fun LogsScreen(
         }
     }
 
-    // load on startup
+    LaunchedEffect(filterLogLevel) {
+        fetchLogs()
+    }
+
     LaunchedEffect(Unit) {
         fetchLogs()
     }
 
-    // calendar dialog
+    // dialogs
     if (showDatePicker) {
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
@@ -188,7 +228,7 @@ fun LogsScreen(
                 TextButton(onClick = {
                     selectedDateMillis = dateState.selectedDateMillis
                     showDatePicker = false
-                    fetchLogs() // auto search when date chosen
+                    fetchLogs()
                 }) { Text("OK") }
             },
             dismissButton = {
@@ -203,21 +243,51 @@ fun LogsScreen(
         }
     }
 
+    // detail view dialog
+    if (selectedLog != null) {
+        AlertDialog(
+            onDismissRequest = { selectedLog = null },
+            title = { Text("Log Details") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    DetailRow("Timestamp", selectedLog!!.timestamp)
+                    DetailRow("Service", selectedLog!!.service)
+                    DetailRow("PID", selectedLog!!.pid)
+                    DetailRow("Priority", "${selectedLog!!.priority} (${getPriorityLabel(selectedLog!!.priority)})")
+
+                    Divider(modifier = Modifier.padding(vertical = 8.dp))
+                    Text("Message:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = selectedLog!!.message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { selectedLog = null }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    // UI structure
     Box(modifier = modifier.fillMaxSize()) {
         Column {
-            // control area
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(8.dp)
             ) {
-                // search and refresh
+                // search
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        label = { Text("Search (ex: error, docker)") },
+                        label = { Text("Search logs") },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                         trailingIcon = {
@@ -239,30 +309,61 @@ fun LogsScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // date and sort
+                // filters
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // date button
+                    // date
                     AssistChip(
                         onClick = { showDatePicker = true },
                         label = {
-                            Text(if (selectedDateMillis != null)
-                                formatDateForCmd(selectedDateMillis!!)
-                            else "Recent")
+                            Text(if (selectedDateMillis != null) formatDateForCmd(selectedDateMillis!!) else "Recent")
                         },
-                        leadingIcon = { Icon(Icons.Filled.CalendarToday, null) }
+                        leadingIcon = { Icon(Icons.Filled.CalendarToday, null) },
+                        modifier = Modifier.weight(1f).padding(end = 4.dp)
                     )
 
-                    // sort button
-                    Box {
+                    // level
+                    Box(modifier = Modifier.weight(1f).padding(horizontal = 4.dp)) {
+                        AssistChip(
+                            onClick = { showLevelMenu = true },
+                            label = {
+                                Text(filterLogLevel.label.split(" ")[0] + "+")
+                            },
+                            leadingIcon = { Icon(Icons.Filled.FilterList, null) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        DropdownMenu(
+                            expanded = showLevelMenu,
+                            onDismissRequest = { showLevelMenu = false }
+                        ) {
+                            LogLevel.values().forEach { level ->
+                                DropdownMenuItem(
+                                    text = { Text(level.label) },
+                                    onClick = {
+                                        filterLogLevel = level
+                                        showLevelMenu = false
+                                    },
+                                    leadingIcon = {
+                                        if (level == filterLogLevel) {
+                                            Icon(Icons.Filled.Sort, null)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // sort
+                    Box(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
                         AssistChip(
                             onClick = { showSortMenu = true },
-                            label = {
-                                Text(if (sortOption == SortOption.TimeNewest) "Time" else "Severity")
-                            },
-                            leadingIcon = { Icon(Icons.Filled.Sort, null) }
+                            label = { Text(if (sortOption == SortOption.TimeNewest) "Time" else "Prio") },
+                            leadingIcon = { Icon(Icons.Filled.Sort, null) },
+                            modifier = Modifier.fillMaxWidth()
                         )
 
                         DropdownMenu(
@@ -290,7 +391,6 @@ fun LogsScreen(
 
             Divider()
 
-            // log list
             if (isLoading) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
@@ -307,7 +407,10 @@ fun LogsScreen(
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
                 items(logsList) { log ->
-                    LogItem(log)
+                    LogItem(
+                        log = log,
+                        onClick = { selectedLog = it }
+                    )
                 }
             }
         }
@@ -315,7 +418,7 @@ fun LogsScreen(
 }
 
 @Composable
-fun LogItem(log: LogEntry) {
+fun LogItem(log: LogEntry, onClick: (LogEntry) -> Unit) {
     // 0-3 error, 4 warning, rest info
     val (icon, color) = when {
         log.priority <= 3 -> Pair(Icons.Filled.Warning, Color(0xFFFF5252))
@@ -324,6 +427,7 @@ fun LogItem(log: LogEntry) {
     }
 
     Card(
+        onClick = { onClick(log) },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         ),
@@ -370,9 +474,26 @@ fun LogItem(log: LogEntry) {
                 Text(
                     text = log.message,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
         }
     }
+}
+
+@Composable
+fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Text(text = value, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+fun getPriorityLabel(prio: Int): String {
+    return LogLevel.values().find { it.value == prio }?.label ?: "Unknown"
 }

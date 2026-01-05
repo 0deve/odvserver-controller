@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,7 +23,8 @@ enum class Screen {
     Control,
     Logs,
     Terminal,
-    Overview
+    Overview,
+    Services
 }
 
 // data class to hold common data between screens
@@ -48,7 +50,7 @@ fun AppContainer(
     // connection details
     val connectionDetails = remember { ConnectionDetails() }
     val context = androidx.compose.ui.platform.LocalContext.current
-    val sshManager = remember { SshManager(context) }
+    val sshManager = remember { SshManager(context.applicationContext) }
 
     var terminalHistory by remember { mutableStateOf(listOf<TerminalItem>()) }
 
@@ -108,6 +110,17 @@ fun AppContainer(
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
 
+                //services
+                NavigationDrawerItem(
+                    label = { Text("Services") },
+                    icon = { Icon(Icons.Filled.Settings, contentDescription = null) },selected = currentScreen == Screen.Services,
+                    onClick = {
+                        currentScreen = Screen.Services
+                        scope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+
                 //logs
                 NavigationDrawerItem(
                     label = { Text("Logs") },
@@ -141,6 +154,7 @@ fun AppContainer(
                         Text(when(currentScreen) {
                             Screen.Control -> "Server Control"
                             Screen.Overview -> "Overview"
+                            Screen.Services -> "Services"
                             Screen.Logs -> "Server Logs"
                             Screen.Terminal -> "Terminal"
                         })
@@ -162,6 +176,10 @@ fun AppContainer(
                         connectionDetails = connectionDetails
                     )
                     Screen.Overview -> OverviewScreen(
+                        sshManager = sshManager,
+                        connectionDetails = connectionDetails
+                    )
+                    Screen.Services -> ServicesScreen(
                         sshManager = sshManager,
                         connectionDetails = connectionDetails
                     )

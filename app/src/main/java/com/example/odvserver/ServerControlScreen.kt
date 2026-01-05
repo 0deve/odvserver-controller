@@ -205,7 +205,9 @@ fun ServerControlScreen(
                 }
 
                 Button(
-                    onClick = { runCmd("echo $password | sudo -S reboot") },
+                    onClick = {
+                        val safePass = password.replace("'", "'\\''")
+                        runCmd("echo '$safePass' | sudo -S -p '' reboot") },
                     colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
                     enabled = !isLoading
                 ) {

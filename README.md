@@ -1,4 +1,4 @@
-# ODV Server Controller
+# Server Controller
 This server manager is a native android application built with Kotlin and Jetpack Compose for remote Linux server administration. It allows users to monitor system health, view logs, and execute terminal commands via SSH.
 
 This application uses a Trust On First Use (TOFU) security model, similar to standard SSH clients (like PuTTY or OpenSSH).
